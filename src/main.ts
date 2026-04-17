@@ -1104,12 +1104,10 @@ class GameScene extends Phaser.Scene {
   private distanceRemaining = 0
   private missionTimer = 0
 
-  private missionText!: Phaser.GameObjects.Text
   private distanceText!: Phaser.GameObjects.Text
   private timerText!: Phaser.GameObjects.Text
   private districtText!: Phaser.GameObjects.Text
   private routeText!: Phaser.GameObjects.Text
-  private rigText!: Phaser.GameObjects.Text
   private hullText!: Phaser.GameObjects.Text
 
   private hull = 1
@@ -2430,7 +2428,7 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     })
 
-    this.rigText = this.add.text(18, 138, 'RIG: OLD TOW TRUCK', {
+    this.add.text(18, 138, 'RIG: OLD TOW TRUCK', {
       fontFamily: 'Arial Black',
       fontSize: '14px',
       color: '#ffcb8e',
@@ -2447,7 +2445,7 @@ class GameScene extends Phaser.Scene {
     })
     this.updateHullText()
 
-    this.missionText = this.add.text(width / 2, 20, `MISSION: ${this.mission.title.toUpperCase()}`, {
+    this.add.text(width / 2, 20, `MISSION: ${this.mission.title.toUpperCase()}`, {
       fontFamily: 'Arial Black',
       fontSize: '18px',
       color: '#ffe8bc',
