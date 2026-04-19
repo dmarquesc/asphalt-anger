@@ -179,6 +179,14 @@ type AtmosphereOrb = {
   tint: number
 }
 
+type RoadGlowBar = {
+  bar: Phaser.GameObjects.Rectangle
+  side: 'left' | 'right'
+  depth: number
+  phase: number
+  tint: number
+}
+
 const MAX_UPGRADE_LEVEL = 3
 const PROFILE_KEY = 'asphalt-anger-profile-v8'
 const BEST_SCORE_KEY = 'asphalt-anger-best-v8'
@@ -1388,6 +1396,14 @@ class GameScene extends Phaser.Scene {
   private billboards: NeonBillboard[] = []
   private searchLights: SearchLight[] = []
   private atmosphereOrbs: AtmosphereOrb[] = []
+  private roadGlowBars: RoadGlowBar[] = []
+
+  private playerTrailLeft!: Phaser.GameObjects.Rectangle
+  private playerTrailRight!: Phaser.GameObjects.Rectangle
+  private chromeFrameTop!: Phaser.GameObjects.Rectangle
+  private chromeFrameBottom!: Phaser.GameObjects.Rectangle
+  private chromeFrameLeft!: Phaser.GameObjects.Rectangle
+  private chromeFrameRight!: Phaser.GameObjects.Rectangle
 
   private trafficWaveTimer = 10
   private trafficWaveCount = 0
@@ -1709,6 +1725,18 @@ class GameScene extends Phaser.Scene {
     } satisfies AtmosphereOrb
   }
 
+  private createRoadGlowBar(tint: number) {
+    const bar = this.add.rectangle(0, 0, 10, 80, tint, 0.08)
+    bar.setBlendMode(Phaser.BlendModes.ADD)
+    return {
+      bar,
+      side: Phaser.Math.Between(0, 1) === 0 ? 'left' : 'right',
+      depth: Phaser.Math.FloatBetween(0.04, 0.48),
+      phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
+      tint,
+    } satisfies RoadGlowBar
+  }
+
   private updateShowcaseGraphics(time: number, delta: number) {
     const { width, height } = this.scale
     const night = this.getNightIntensity()
@@ -1772,6 +1800,27 @@ class GameScene extends Phaser.Scene {
       billboard.glow.setFillStyle(billboard.tint, 0.08 + night * 0.16 + (this.rushActive ? 0.05 : 0))
       billboard.glow.alpha = 0.08 + night * 0.14 + (this.rushActive ? 0.06 : 0)
       billboard.text.setScale(1 + Math.sin(time * 0.004 + billboard.depth * 8) * 0.04)
+    }
+
+    for (const glowBar of this.roadGlowBars) {
+      glowBar.depth += this.roadSpeed * 0.72 * (0.62 + glowBar.depth * 1.56) * (delta / 1000)
+      if (glowBar.depth > 1.02) {
+        glowBar.depth = Phaser.Math.FloatBetween(0.02, 0.16)
+        glowBar.side = Phaser.Math.Between(0, 1) === 0 ? 'left' : 'right'
+      }
+
+      const p = this.project(glowBar.depth)
+      glowBar.bar.x = this.roadEdgeX(glowBar.side, glowBar.depth, Phaser.Math.Linear(12, 36, p.eased))
+      glowBar.bar.y = p.y
+      glowBar.bar.width = Phaser.Math.Linear(2, 12, p.eased)
+      glowBar.bar.height = Phaser.Math.Linear(18, 170, p.eased)
+      glowBar.bar.alpha =
+        0.03 +
+        night * 0.1 +
+        Math.sin(time * 0.003 + glowBar.phase) * 0.02 +
+        (this.rushActive ? 0.06 : 0)
+      glowBar.bar.setFillStyle(glowBar.tint, Phaser.Math.Clamp(glowBar.bar.alpha, 0.02, 0.22))
+      glowBar.bar.setDepth(Math.floor(p.y) + 1)
     }
 
     this.horizonHaze.alpha = 0.06 + night * 0.14 + (this.weatherMode === 'fog' ? 0.1 : 0)
@@ -2783,6 +2832,16 @@ class GameScene extends Phaser.Scene {
       orb.glow.setFillStyle(district.accentColor, 0.05)
     }
 
+    for (const glowBar of this.roadGlowBars) {
+      glowBar.tint = district.accentColor
+      glowBar.bar.setFillStyle(district.accentColor, 0.08)
+    }
+
+    this.chromeFrameTop?.setFillStyle(district.accentColor, 0.16)
+    this.chromeFrameBottom?.setFillStyle(district.accentColor, 0.16)
+    this.chromeFrameLeft?.setFillStyle(district.accentColor, 0.14)
+    this.chromeFrameRight?.setFillStyle(district.accentColor, 0.14)
+
     this.districtText.setText(`DISTRICT: ${district.name}`)
     this.districtText.setColor(hexColor(district.accentColor))
     this.routeText.setText(this.mission.route.map((districtId) => DISTRICTS[districtId].name).join(' → '))
@@ -3255,6 +3314,12 @@ class GameScene extends Phaser.Scene {
       this.atmosphereOrbs.push(orb)
     }
 
+    for (let i = 0; i < 10; i++) {
+      const glowBar = this.createRoadGlowBar(this.currentDistrict.accentColor)
+      glowBar.phase = i * 0.6
+      this.roadGlowBars.push(glowBar)
+    }
+
     this.roadGraphics = this.add.graphics()
     this.roadFxGraphics = this.add.graphics()
     this.angerFlameGraphics = this.add.graphics()
@@ -3324,6 +3389,28 @@ class GameScene extends Phaser.Scene {
       warned: false,
     }
     this.pedestrian.container.setVisible(false)
+
+    this.playerTrailLeft = this.add.rectangle(
+      this.laneBottomXs[this.currentLaneIndex] - 18,
+      this.playerBaseY + 96,
+      12,
+      120,
+      this.currentDistrict.accentColor,
+      0,
+    )
+    this.playerTrailLeft.setBlendMode(Phaser.BlendModes.ADD)
+    this.playerTrailLeft.setDepth(8996)
+
+    this.playerTrailRight = this.add.rectangle(
+      this.laneBottomXs[this.currentLaneIndex] + 18,
+      this.playerBaseY + 96,
+      12,
+      120,
+      this.currentDistrict.accentColor,
+      0,
+    )
+    this.playerTrailRight.setBlendMode(Phaser.BlendModes.ADD)
+    this.playerTrailRight.setDepth(8996)
 
     this.playerShadow = this.add.ellipse(
       this.laneBottomXs[this.currentLaneIndex],
@@ -4232,6 +4319,8 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
+
 
 
 
