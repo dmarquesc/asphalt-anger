@@ -120,6 +120,8 @@ type Pedestrian = {
   warned: boolean
 }
 
+type WeatherMode = 'clear' | 'rain' | 'storm' | 'fog'
+
 const MAX_UPGRADE_LEVEL = 3
 const PROFILE_KEY = 'asphalt-anger-profile-v6'
 const BEST_SCORE_KEY = 'asphalt-anger-best-v6'
@@ -1293,6 +1295,27 @@ class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private keyZ!: Phaser.Input.Keyboard.Key
   private keyX!: Phaser.Input.Keyboard.Key
+  private keyC!: Phaser.Input.Keyboard.Key
+
+  private rushReadyText!: Phaser.GameObjects.Text
+  private rushMeterBg!: Phaser.GameObjects.Rectangle
+  private rushMeterFill!: Phaser.GameObjects.Rectangle
+  private rushActive = false
+  private rushTimer = 0
+  private rushCooldown = 0
+
+  private launchLocked = true
+  private launchOverlayBg!: Phaser.GameObjects.Rectangle
+  private launchOverlayText!: Phaser.GameObjects.Text
+  private launchOverlaySubText!: Phaser.GameObjects.Text
+
+  private weatherMode: WeatherMode = 'clear'
+  private weatherTintOverlay!: Phaser.GameObjects.Rectangle
+  private rainDrops: Phaser.GameObjects.Rectangle[] = []
+  private weatherFlashTimer = 0
+
+  private trafficWaveTimer = 10
+  private trafficWaveCount = 0
 
   private dashDepths: number[] = []
 
@@ -1327,12 +1350,20 @@ class GameScene extends Phaser.Scene {
   private abilityButtonY = 0
   private abilityButtonRadius = 52
 
+  private mobileRushButtonX = 0
+  private mobileRushButtonY = 0
+  private mobileRushButtonRadius = 46
+
   private mobileRotateBg?: Phaser.GameObjects.Rectangle
   private mobileRotateText?: Phaser.GameObjects.Text
 
   private mobileAbilityButtonBg?: Phaser.GameObjects.Ellipse
   private mobileAbilityButtonRing?: Phaser.GameObjects.Ellipse
   private mobileAbilityButtonText?: Phaser.GameObjects.Text
+
+  private mobileRushButtonBg?: Phaser.GameObjects.Ellipse
+  private mobileRushButtonRing?: Phaser.GameObjects.Ellipse
+  private mobileRushButtonText?: Phaser.GameObjects.Text
 
   private mobileLeftButtonBg?: Phaser.GameObjects.Ellipse
   private mobileRightButtonBg?: Phaser.GameObjects.Ellipse
@@ -1370,10 +1401,11 @@ class GameScene extends Phaser.Scene {
 
   private speedFactor() {
     const engineBonus = this.profile.engine * 0.06
+    const rushBonus = this.rushActive ? 0.48 : 0
     return Phaser.Math.Clamp(
-      1 + this.speedStep * 0.14 + engineBonus + this.currentDistrict.speedBias,
+      1 + this.speedStep * 0.14 + engineBonus + this.currentDistrict.speedBias + rushBonus,
       0.72,
-      1.78,
+      2.18,
     )
   }
 
@@ -1423,8 +1455,11 @@ class GameScene extends Phaser.Scene {
     this.mobileRightButtonX = width * 0.8
     this.mobileRightButtonY = height - 110
 
+    this.mobileRushButtonX = width / 2
+    this.mobileRushButtonY = height - 322
+
     this.abilityButtonX = width / 2
-    this.abilityButtonY = height - 230
+    this.abilityButtonY = height - 228
 
     if (this.mobileLeftButtonBg) {
       this.mobileLeftButtonBg.setPosition(this.mobileLeftButtonX, this.mobileLeftButtonY)
@@ -1446,6 +1481,21 @@ class GameScene extends Phaser.Scene {
       this.mobileRightButtonText.setVisible(!blocked)
     }
 
+    if (this.mobileRushButtonBg) {
+      this.mobileRushButtonBg.setPosition(this.mobileRushButtonX, this.mobileRushButtonY)
+      this.mobileRushButtonBg.setVisible(!blocked)
+    }
+
+    if (this.mobileRushButtonRing) {
+      this.mobileRushButtonRing.setPosition(this.mobileRushButtonX, this.mobileRushButtonY)
+      this.mobileRushButtonRing.setVisible(!blocked)
+    }
+
+    if (this.mobileRushButtonText) {
+      this.mobileRushButtonText.setPosition(this.mobileRushButtonX, this.mobileRushButtonY)
+      this.mobileRushButtonText.setVisible(!blocked)
+    }
+
     if (this.mobileAbilityButtonBg) {
       this.mobileAbilityButtonBg.setPosition(this.abilityButtonX, this.abilityButtonY)
       this.mobileAbilityButtonBg.setVisible(!blocked)
@@ -1462,7 +1512,7 @@ class GameScene extends Phaser.Scene {
     }
 
     if (this.mobileSpeedHint) {
-      this.mobileSpeedHint.setPosition(width / 2, height - 315)
+      this.mobileSpeedHint.setPosition(width / 2, height - 392)
       this.mobileSpeedHint.setVisible(!blocked)
     }
 
@@ -1477,6 +1527,131 @@ class GameScene extends Phaser.Scene {
       this.mobileRotateText.setPosition(width / 2, height / 2)
       this.mobileRotateText.setVisible(blocked)
     }
+  }
+
+
+  private refreshWeatherMode() {
+    if (this.currentDistrict.id === 'highway' || this.currentDistrict.id === 'downtown') {
+      this.weatherMode = 'rain'
+    } else if (this.currentDistrict.id === 'entertainment') {
+      this.weatherMode = 'storm'
+    } else if (this.currentDistrict.id === 'industrial') {
+      this.weatherMode = 'fog'
+    } else {
+      this.weatherMode = 'clear'
+    }
+
+    if (!this.weatherTintOverlay) return
+
+    if (this.weatherMode === 'clear') {
+      this.weatherTintOverlay.setFillStyle(0x9fc6ff, 0)
+    } else if (this.weatherMode === 'fog') {
+      this.weatherTintOverlay.setFillStyle(0xe3ebf5, 0.08)
+    } else if (this.weatherMode === 'storm') {
+      this.weatherTintOverlay.setFillStyle(0x8ca9da, 0.08)
+    } else {
+      this.weatherTintOverlay.setFillStyle(0x89b7ff, 0.04)
+    }
+  }
+
+  private startLaunchSequence() {
+    const { width, height } = this.scale
+
+    this.launchLocked = true
+
+    this.launchOverlayBg = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.24)
+    this.launchOverlayBg.setDepth(9800)
+
+    this.launchOverlayText = this.add.text(width / 2, height * 0.44, '3', {
+      fontFamily: 'Arial Black',
+      fontSize: '118px',
+      color: '#ffe8bc',
+      stroke: '#000000',
+      strokeThickness: 12,
+    }).setOrigin(0.5)
+    this.launchOverlayText.setDepth(9801)
+
+    this.launchOverlaySubText = this.add.text(width / 2, height * 0.53, 'CHECK MIRRORS', {
+      fontFamily: 'Arial Black',
+      fontSize: '24px',
+      color: '#8df0ff',
+      stroke: '#000000',
+      strokeThickness: 6,
+    }).setOrigin(0.5)
+    this.launchOverlaySubText.setDepth(9801)
+
+    const steps = [
+      { delay: 0, label: '3', sub: 'CHECK MIRRORS' },
+      { delay: 700, label: '2', sub: 'GRIP THE WHEEL' },
+      { delay: 1400, label: '1', sub: 'HOLD THE LINE' },
+      { delay: 2100, label: 'GO!', sub: `DESTINATION ${this.mission.destination}` },
+    ]
+
+    steps.forEach((step) => {
+      this.time.delayedCall(step.delay, () => {
+        this.launchOverlayText.setText(step.label)
+        this.launchOverlaySubText.setText(step.sub)
+        this.launchOverlayText.setScale(1.25)
+        this.launchOverlaySubText.setScale(1.08)
+
+        this.tweens.add({
+          targets: [this.launchOverlayText, this.launchOverlaySubText],
+          scale: 1,
+          duration: 170,
+          ease: 'Back.Out',
+        })
+      })
+    })
+
+    this.time.delayedCall(2900, () => {
+      this.launchLocked = false
+
+      this.tweens.add({
+        targets: [this.launchOverlayBg, this.launchOverlayText, this.launchOverlaySubText],
+        alpha: 0,
+        duration: 260,
+        ease: 'Quad.Out',
+        onComplete: () => {
+          this.launchOverlayBg.destroy()
+          this.launchOverlayText.destroy()
+          this.launchOverlaySubText.destroy()
+        },
+      })
+    })
+  }
+
+  private triggerTrafficWave() {
+    this.trafficWaveCount += 1
+
+    const spawnCount = Math.min(3, 1 + Math.floor(this.trafficWaveCount / 2))
+    const pool: EnemyKind[] = ['traffic', 'traffic', 'texting']
+    if (this.trafficWaveCount >= 2) pool.push('turning')
+    if (this.trafficWaveCount >= 4) pool.push('switchlane')
+
+    for (let i = 0; i < spawnCount; i++) {
+      if (this.enemyCars.length >= 14) break
+      const kind = pool[Phaser.Math.Between(0, pool.length - 1)]
+      this.createEnemy(kind, 0.03 + i * 0.05)
+    }
+
+    this.trafficWaveTimer = Math.max(6.5, 12 - this.trafficWaveCount * 0.42 + Phaser.Math.FloatBetween(-0.4, 1.2))
+    this.showEnemyWarning(`WAVE ${this.trafficWaveCount} INCOMING`)
+    this.spawnScorePopup(this.scale.width / 2, 214, `WAVE ${this.trafficWaveCount}`, '#ffcb8e')
+  }
+
+  private triggerRageRush() {
+    if (this.launchLocked || this.gameEnded) return
+    if (this.rushActive || this.rushCooldown > 0) return
+    if (this.anger < 65) return
+
+    this.rushActive = true
+    this.rushTimer = 3600
+    this.rushCooldown = 12000
+    this.anger = Math.max(0, this.anger - 52)
+
+    this.showBobReaction('RAGE RUSH!')
+    this.cameras.main.flash(120, 255, 210, 140)
+    this.spawnSparkBurst(this.player.x, this.player.y - 10, 0xffefb8)
   }
 
   private adjustSpeedStep(amount: number) {
@@ -2125,6 +2300,8 @@ class GameScene extends Phaser.Scene {
       building.setFillStyle(district.skylineColor, 0.96)
     }
 
+    this.refreshWeatherMode()
+
     this.districtText.setText(`DISTRICT: ${district.name}`)
     this.districtText.setColor(hexColor(district.accentColor))
     this.routeText.setText(this.mission.route.map((districtId) => DISTRICTS[districtId].name).join(' → '))
@@ -2296,6 +2473,7 @@ class GameScene extends Phaser.Scene {
     if (!this.isTouchDevice) return
 
     this.mobileThumbRadius = Math.min(64, width * 0.12)
+    this.mobileRushButtonRadius = Math.min(48, width * 0.092)
     this.abilityButtonRadius = Math.min(54, width * 0.1)
 
     this.mobileLeftButtonBg = this.add.ellipse(0, 0, this.mobileThumbRadius * 2, this.mobileThumbRadius * 2, 0xff8a3d, 0.3)
@@ -2315,6 +2493,19 @@ class GameScene extends Phaser.Scene {
     this.mobileRightButtonText = this.add.text(0, 0, '→', {
       fontFamily: 'Arial Black',
       fontSize: '34px',
+      color: '#fff2d2',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5)
+
+    this.mobileRushButtonBg = this.add.ellipse(0, 0, this.mobileRushButtonRadius * 2, this.mobileRushButtonRadius * 2, 0xff5a1f, 0.28)
+    this.mobileRushButtonBg.setStrokeStyle(4, 0xffd690, 0.74)
+
+    this.mobileRushButtonRing = this.add.ellipse(0, 0, this.mobileRushButtonRadius * 2.28, this.mobileRushButtonRadius * 2.28, 0xffd690, 0.08)
+
+    this.mobileRushButtonText = this.add.text(0, 0, 'RUSH', {
+      fontFamily: 'Arial Black',
+      fontSize: '16px',
       color: '#fff2d2',
       stroke: '#000000',
       strokeThickness: 5,
@@ -2372,6 +2563,11 @@ class GameScene extends Phaser.Scene {
         return
       }
 
+      if (this.isPointerInCircle(pointer.x, pointer.y, this.mobileRushButtonX, this.mobileRushButtonY, this.mobileRushButtonRadius)) {
+        this.triggerRageRush()
+        return
+      }
+
       if (this.isPointerInCircle(pointer.x, pointer.y, this.abilityButtonX, this.abilityButtonY, this.abilityButtonRadius)) {
         this.triggerSmokeWeapon()
       }
@@ -2384,6 +2580,7 @@ class GameScene extends Phaser.Scene {
       if (
         this.isPointerInCircle(pointer.x, pointer.y, this.mobileLeftButtonX, this.mobileLeftButtonY, this.mobileThumbRadius) ||
         this.isPointerInCircle(pointer.x, pointer.y, this.mobileRightButtonX, this.mobileRightButtonY, this.mobileThumbRadius) ||
+        this.isPointerInCircle(pointer.x, pointer.y, this.mobileRushButtonX, this.mobileRushButtonY, this.mobileRushButtonRadius) ||
         this.isPointerInCircle(pointer.x, pointer.y, this.abilityButtonX, this.abilityButtonY, this.abilityButtonRadius)
       ) {
         return
@@ -2731,9 +2928,47 @@ class GameScene extends Phaser.Scene {
     this.speedOverlay = this.add.rectangle(width / 2, height / 2, width, height, 0xffffff, 0)
     this.speedOverlay.setBlendMode(Phaser.BlendModes.SCREEN)
 
+    this.weatherTintOverlay = this.add.rectangle(width / 2, height / 2, width, height, 0x9fc6ff, 0)
+    this.weatherTintOverlay.setBlendMode(Phaser.BlendModes.SCREEN)
+
+    for (let i = 0; i < 56; i++) {
+      const drop = this.add.rectangle(
+        Phaser.Math.Between(0, width),
+        Phaser.Math.Between(-height, height),
+        2,
+        Phaser.Math.Between(20, 42),
+        0xcfe8ff,
+        0.16,
+      )
+      drop.setAngle(17)
+      drop.setBlendMode(Phaser.BlendModes.SCREEN)
+      drop.setVisible(false)
+      this.rainDrops.push(drop)
+    }
+
+    this.rushMeterBg = this.add.rectangle(width - 146, 126, 116, 12, 0x000000, 0.62).setOrigin(0, 0.5)
+    this.rushMeterFill = this.add.rectangle(width - 144, 126, 0, 8, 0xff9b3d, 1).setOrigin(0, 0.5)
+
+    this.add.text(width - 18, 92, 'C RUSH', {
+      fontFamily: 'Arial Black',
+      fontSize: '16px',
+      color: '#ffddb0',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(1, 0)
+
+    this.rushReadyText = this.add.text(width - 18, 136, 'CHARGE 0%', {
+      fontFamily: 'Arial Black',
+      fontSize: '14px',
+      color: '#ffe8bc',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(1, 0)
+
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.keyZ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Z)
     this.keyX = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X)
+    this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C)
 
     this.setupTouchControls(width, height)
     this.applyDistrictVisuals()
@@ -2741,6 +2976,7 @@ class GameScene extends Phaser.Scene {
     this.showBobReaction("LET'S RIDE")
     this.updateBobMood()
     this.drawRoad()
+    this.startLaunchSequence()
   }
 
   update(time: number, delta: number) {
@@ -2752,12 +2988,45 @@ class GameScene extends Phaser.Scene {
 
     if (this.gameEnded) return
 
+    if (this.launchLocked) {
+      if (this.mobileAbilityButtonRing) {
+        const pulse = 1 + Math.sin(time * 0.008) * 0.04
+        this.mobileAbilityButtonRing.setScale(pulse)
+      }
+      if (this.mobileRushButtonRing) {
+        const pulse = 1 + Math.sin(time * 0.008 + 0.6) * 0.04
+        this.mobileRushButtonRing.setScale(pulse)
+      }
+      return
+    }
+
     if (Phaser.Input.Keyboard.JustDown(this.cursors.up!)) {
       this.adjustSpeedStep(1)
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.cursors.down!)) {
       this.adjustSpeedStep(-1)
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyC)) {
+      this.triggerRageRush()
+    }
+
+    if (this.rushCooldown > 0) {
+      this.rushCooldown = Math.max(0, this.rushCooldown - delta)
+    }
+
+    if (this.rushActive) {
+      this.rushTimer -= delta
+      if (this.rushTimer <= 0) {
+        this.rushActive = false
+        this.showBobReaction('RUSH OVER')
+      }
+    }
+
+    this.trafficWaveTimer -= delta / 1000
+    if (this.trafficWaveTimer <= 0) {
+      this.triggerTrafficWave()
     }
 
     this.anger = Math.min(100, this.anger + delta * 0.003)
@@ -2863,6 +3132,52 @@ class GameScene extends Phaser.Scene {
       streak.line.height = Phaser.Math.Linear(16, 88, p.eased)
       streak.line.alpha = Phaser.Math.Linear(0.02, 0.14, p.eased) + this.anger * 0.0006
       streak.line.setFillStyle(this.currentDistrict.accentColor, streak.line.alpha)
+    }
+
+    const weatherBaseAlpha =
+      this.weatherMode === 'fog'
+        ? 0.09
+        : this.weatherMode === 'storm'
+          ? 0.08
+          : this.weatherMode === 'rain'
+            ? 0.04
+            : 0
+
+    const weatherColor =
+      this.weatherMode === 'fog'
+        ? 0xe3ebf5
+        : this.weatherMode === 'storm'
+          ? 0x8ca9da
+          : 0x89b7ff
+
+    this.weatherTintOverlay.setFillStyle(weatherColor, weatherBaseAlpha + (this.rushActive ? 0.05 : 0))
+
+    const rainActive = this.weatherMode === 'rain' || this.weatherMode === 'storm'
+    for (const drop of this.rainDrops) {
+      if (!rainActive) {
+        drop.setVisible(false)
+        continue
+      }
+
+      drop.setVisible(true)
+      drop.y += (980 + this.roadSpeed * 420 + Math.max(0, this.speedStep) * 80) * (delta / 1000)
+      drop.x -= (180 + this.roadSpeed * 90) * (delta / 1000)
+      drop.alpha = this.weatherMode === 'storm' ? 0.24 : 0.16
+
+      if (drop.y > this.scale.height + 60 || drop.x < -40) {
+        drop.x = Phaser.Math.Between(0, this.scale.width + 90)
+        drop.y = Phaser.Math.Between(-this.scale.height, -20)
+      }
+    }
+
+    if (this.weatherMode === 'storm') {
+      this.weatherFlashTimer -= delta / 1000
+      if (this.weatherFlashTimer <= 0) {
+        this.weatherFlashTimer = Phaser.Math.FloatBetween(4.2, 7.4)
+        this.cameras.main.flash(80, 200, 220, 255)
+      }
+    } else {
+      this.weatherFlashTimer = 2.8
     }
 
     for (const pickup of this.scrapPickups) {
@@ -2976,11 +3291,19 @@ class GameScene extends Phaser.Scene {
       const dy = Math.abs(enemy.container.y - this.player.y)
 
       if (dx < 58 && dy < 96 && enemy.depth > 0.74) {
-        const destroyed = this.takeHit()
-        this.resetEnemyCar(enemy, Phaser.Math.Between(200, 360))
-        if (destroyed) {
-          this.failMission('WRECKED')
-          return
+        if (this.rushActive) {
+          this.score += 260 + this.combo * 18
+          this.addCombo(2)
+          this.spawnSparkBurst(enemy.container.x, enemy.container.y, 0xffefb8)
+          this.spawnScorePopup(enemy.container.x, enemy.container.y - 12, 'SHOVED', '#ffe8bc')
+          this.resetEnemyCar(enemy, Phaser.Math.Between(200, 360))
+        } else {
+          const destroyed = this.takeHit()
+          this.resetEnemyCar(enemy, Phaser.Math.Between(200, 360))
+          if (destroyed) {
+            this.failMission('WRECKED')
+            return
+          }
         }
       }
 
@@ -3022,7 +3345,7 @@ class GameScene extends Phaser.Scene {
     this.player.y = this.playerBaseY + Math.sin(time * 0.005) * 2
     this.playerShadow.scaleX = 1 + Math.sin(time * 0.005) * 0.02
 
-    this.score += delta * 0.05 * this.speedFactor()
+    this.score += delta * 0.05 * this.speedFactor() * (this.rushActive ? 1.75 : 1)
     const nextScore = Math.floor(this.score)
     if (nextScore !== this.displayedScore) {
       this.displayedScore = nextScore
@@ -3031,8 +3354,29 @@ class GameScene extends Phaser.Scene {
 
     this.angerFill.width = this.anger * 1.8
     this.angerText.setText(`${Math.floor(this.anger)}%`)
-    this.heatOverlay.alpha = this.anger * 0.00185
-    this.speedOverlay.alpha = this.anger * 0.00055 + Math.max(0, this.speedStep) * 0.03
+    this.heatOverlay.alpha = this.anger * 0.00185 + (this.rushActive ? 0.06 : 0)
+    this.speedOverlay.alpha = this.anger * 0.00055 + Math.max(0, this.speedStep) * 0.03 + (this.rushActive ? 0.08 : 0)
+
+    const rushCharge = Phaser.Math.Clamp(this.anger / 65, 0, 1)
+    this.rushMeterFill.width = 112 * rushCharge
+
+    if (this.rushActive) {
+      this.rushReadyText.setText(`ACTIVE ${Math.ceil(this.rushTimer / 1000)}s`)
+      this.rushReadyText.setColor('#fff0c8')
+      this.rushMeterFill.setFillStyle(0xffefb8, 1)
+    } else if (this.rushCooldown > 0) {
+      this.rushReadyText.setText(`COOLDOWN ${Math.ceil(this.rushCooldown / 1000)}s`)
+      this.rushReadyText.setColor('#d8dde8')
+      this.rushMeterFill.setFillStyle(0x8e95a3, 1)
+    } else if (this.anger >= 65) {
+      this.rushReadyText.setText('RUSH READY')
+      this.rushReadyText.setColor('#ffddb0')
+      this.rushMeterFill.setFillStyle(0xff9b3d, 1)
+    } else {
+      this.rushReadyText.setText(`CHARGE ${Math.floor(rushCharge * 100)}%`)
+      this.rushReadyText.setColor('#ffe8bc')
+      this.rushMeterFill.setFillStyle(0xff9b3d, 1)
+    }
 
     this.updateBobMood()
     this.drawAngerFlames(time)
@@ -3083,6 +3427,17 @@ class GameScene extends Phaser.Scene {
       if (this.mobileAbilityButtonText) this.mobileAbilityButtonText.setAlpha(1)
     }
 
+    if (this.mobileRushButtonBg) {
+      if (this.rushActive) this.mobileRushButtonBg.setAlpha(0.36)
+      else if (this.rushCooldown > 0) this.mobileRushButtonBg.setAlpha(0.16)
+      else if (this.anger >= 65) this.mobileRushButtonBg.setAlpha(0.34)
+      else this.mobileRushButtonBg.setAlpha(0.18)
+    }
+
+    if (this.mobileRushButtonText) {
+      this.mobileRushButtonText.setAlpha(this.rushCooldown > 0 ? 0.42 : 1)
+    }
+
     if (Phaser.Input.Keyboard.JustDown(this.cursors.left!)) {
       this.moveToLane(this.currentLaneIndex - 1)
     }
@@ -3102,6 +3457,11 @@ class GameScene extends Phaser.Scene {
     if (this.mobileAbilityButtonRing) {
       const pulse = 1 + Math.sin(time * 0.008) * 0.04
       this.mobileAbilityButtonRing.setScale(pulse)
+    }
+
+    if (this.mobileRushButtonRing) {
+      const rushPulse = 1 + Math.sin(time * 0.008 + 0.8) * 0.05
+      this.mobileRushButtonRing.setScale(rushPulse)
     }
 
     if (this.mobileLeftButtonBg && this.mobileRightButtonBg) {
@@ -3126,4 +3486,5 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
