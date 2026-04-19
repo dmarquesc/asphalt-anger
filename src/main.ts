@@ -162,9 +162,26 @@ type NeonBillboard = {
   tint: number
 }
 
+type SearchLight = {
+  beam: Phaser.GameObjects.Triangle
+  base: Phaser.GameObjects.Rectangle
+  side: 'left' | 'right'
+  phase: number
+  sweep: number
+  tint: number
+}
+
+type AtmosphereOrb = {
+  glow: Phaser.GameObjects.Ellipse
+  phase: number
+  driftX: number
+  driftY: number
+  tint: number
+}
+
 const MAX_UPGRADE_LEVEL = 3
-const PROFILE_KEY = 'asphalt-anger-profile-v7'
-const BEST_SCORE_KEY = 'asphalt-anger-best-v7'
+const PROFILE_KEY = 'asphalt-anger-profile-v8'
+const BEST_SCORE_KEY = 'asphalt-anger-best-v8'
 
 const DISTRICTS: Record<DistrictId, DistrictDef> = {
   residential: {
@@ -640,7 +657,7 @@ class MenuScene extends Phaser.Scene {
         '• Portrait mobile controls',
         '• District system and garage upgrades',
         '• Street lights, stop signs, smoke weapon',
-        '• Neon skyline, billboards, haze, road reflections',
+        '• Neon skyline, searchlights, haze, reflections',
       ].join('\n'),
       {
         fontFamily: 'Arial Black',
@@ -1369,6 +1386,8 @@ class GameScene extends Phaser.Scene {
   private stars: AmbientStar[] = []
   private skylineTwinkles: SkylineTwinkle[] = []
   private billboards: NeonBillboard[] = []
+  private searchLights: SearchLight[] = []
+  private atmosphereOrbs: AtmosphereOrb[] = []
 
   private trafficWaveTimer = 10
   private trafficWaveCount = 0
@@ -1659,8 +1678,39 @@ class GameScene extends Phaser.Scene {
     billboard.glow.setFillStyle(billboard.tint, 0.14 + this.currentDistrict.lightStrength * 0.16)
   }
 
+  private createSearchLight(tint: number) {
+    const beam = this.add.triangle(0, 0, 0, 0, 84, -340, 168, 0, tint, 0.08)
+    beam.setBlendMode(Phaser.BlendModes.ADD)
+    beam.setOrigin(0.5, 1)
+
+    const base = this.add.rectangle(0, 0, 18, 12, tint, 0.28)
+    base.setBlendMode(Phaser.BlendModes.ADD)
+
+    return {
+      beam,
+      base,
+      side: Phaser.Math.Between(0, 1) === 0 ? 'left' : 'right',
+      phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
+      sweep: Phaser.Math.FloatBetween(18, 42),
+      tint,
+    } satisfies SearchLight
+  }
+
+  private createAtmosphereOrb(tint: number) {
+    const glow = this.add.ellipse(0, 0, Phaser.Math.Between(140, 260), Phaser.Math.Between(70, 150), tint, 0.06)
+    glow.setBlendMode(Phaser.BlendModes.ADD)
+
+    return {
+      glow,
+      phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
+      driftX: Phaser.Math.FloatBetween(18, 60),
+      driftY: Phaser.Math.FloatBetween(8, 24),
+      tint,
+    } satisfies AtmosphereOrb
+  }
+
   private updateShowcaseGraphics(time: number, delta: number) {
-    const { width } = this.scale
+    const { width, height } = this.scale
     const night = this.getNightIntensity()
 
     for (const star of this.stars) {
@@ -1675,6 +1725,32 @@ class GameScene extends Phaser.Scene {
     for (const windowLight of this.skylineTwinkles) {
       const pulse = 0.6 + Math.sin(time * 0.003 + windowLight.twinkle) * 0.4
       windowLight.light.alpha = windowLight.baseAlpha * pulse * (0.4 + night * 0.9)
+    }
+
+    for (const searchLight of this.searchLights) {
+      const swing = Math.sin(time * 0.0012 + searchLight.phase) * searchLight.sweep
+      const beamHeight = Phaser.Math.Linear(220, 360, night)
+      const beamWidth = Phaser.Math.Linear(88, 170, night)
+      const baseX = searchLight.side === 'left' ? this.centerX - 220 : this.centerX + 220
+
+      searchLight.base.x = baseX
+      searchLight.base.y = this.horizonY + 114
+      searchLight.base.width = 16 + night * 12
+      searchLight.base.alpha = 0.08 + night * 0.18
+
+      searchLight.beam.x = baseX + swing
+      searchLight.beam.y = this.horizonY + 116
+      searchLight.beam.width = beamWidth
+      searchLight.beam.height = beamHeight
+      searchLight.beam.angle = (searchLight.side === 'left' ? -18 : 18) + Math.sin(time * 0.001 + searchLight.phase) * 18
+      searchLight.beam.alpha = 0.02 + night * 0.1 + (this.rushActive ? 0.03 : 0)
+    }
+
+    for (const orb of this.atmosphereOrbs) {
+      orb.glow.x = this.centerX + Math.sin(time * 0.0005 + orb.phase) * orb.driftX
+      orb.glow.y = height * 0.24 + Math.cos(time * 0.0007 + orb.phase) * orb.driftY
+      orb.glow.rotation += 0.0008 * delta
+      orb.glow.alpha = 0.02 + night * 0.04 + (this.weatherMode === 'fog' ? 0.03 : 0) + (this.rushActive ? 0.01 : 0)
     }
 
     for (const billboard of this.billboards) {
@@ -1695,6 +1771,7 @@ class GameScene extends Phaser.Scene {
       billboard.panel.setFillStyle(billboard.tint, 0.12 + night * 0.08)
       billboard.glow.setFillStyle(billboard.tint, 0.08 + night * 0.16 + (this.rushActive ? 0.05 : 0))
       billboard.glow.alpha = 0.08 + night * 0.14 + (this.rushActive ? 0.06 : 0)
+      billboard.text.setScale(1 + Math.sin(time * 0.004 + billboard.depth * 8) * 0.04)
     }
 
     this.horizonHaze.alpha = 0.06 + night * 0.14 + (this.weatherMode === 'fog' ? 0.1 : 0)
@@ -2695,6 +2772,17 @@ class GameScene extends Phaser.Scene {
       billboard.glow.setFillStyle(district.accentColor, 0.12 + district.lightStrength * 0.18)
     }
 
+    for (const searchLight of this.searchLights) {
+      searchLight.tint = district.accentColor
+      searchLight.beam.setFillStyle(district.accentColor, 0.08)
+      searchLight.base.setFillStyle(district.accentColor, 0.22)
+    }
+
+    for (const orb of this.atmosphereOrbs) {
+      orb.tint = district.accentColor
+      orb.glow.setFillStyle(district.accentColor, 0.05)
+    }
+
     this.districtText.setText(`DISTRICT: ${district.name}`)
     this.districtText.setColor(hexColor(district.accentColor))
     this.routeText.setText(this.mission.route.map((districtId) => DISTRICTS[districtId].name).join(' → '))
@@ -2852,6 +2940,20 @@ class GameScene extends Phaser.Scene {
     fx.moveTo(top.right + 18, top.y)
     fx.lineTo(bottom.right + 30, bottom.y)
     fx.strokePath()
+
+    for (const laneRibbonDepth of [0.14, 0.3, 0.5, 0.74, 0.9]) {
+      const p = this.project(laneRibbonDepth)
+      const ribbonAlpha = 0.02 + p.eased * 0.05 + (this.rushActive ? 0.03 : 0)
+      fx.lineStyle(Phaser.Math.Linear(2, 10, p.eased), district.accentColor, ribbonAlpha)
+      fx.beginPath()
+      fx.moveTo(p.left + 24, p.y)
+      fx.lineTo(p.left + 64, p.y)
+      fx.strokePath()
+      fx.beginPath()
+      fx.moveTo(p.right - 24, p.y)
+      fx.lineTo(p.right - 64, p.y)
+      fx.strokePath()
+    }
 
     for (const divider of [1, 2]) {
       for (const dashDepth of this.dashDepths) {
@@ -3136,6 +3238,21 @@ class GameScene extends Phaser.Scene {
       billboard.side = i % 2 === 0 ? 'left' : 'right'
       billboard.depth = 0.08 + i * 0.16
       this.billboards.push(billboard)
+    }
+
+    for (let i = 0; i < 3; i++) {
+      const searchLight = this.createSearchLight(this.currentDistrict.accentColor)
+      searchLight.side = i % 2 === 0 ? 'left' : 'right'
+      searchLight.phase = i * 1.3
+      this.searchLights.push(searchLight)
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const orb = this.createAtmosphereOrb(this.currentDistrict.accentColor)
+      orb.phase = i * 0.9
+      orb.glow.x = this.centerX
+      orb.glow.y = height * 0.24
+      this.atmosphereOrbs.push(orb)
     }
 
     this.roadGraphics = this.add.graphics()
@@ -4115,6 +4232,7 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
 
 
