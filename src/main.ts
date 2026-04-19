@@ -138,9 +138,33 @@ type SetPieceHazard = {
   passed: boolean
 }
 
+
+type AmbientStar = {
+  dot: Phaser.GameObjects.Arc
+  twinkle: number
+  drift: number
+}
+
+type SkylineTwinkle = {
+  light: Phaser.GameObjects.Rectangle
+  twinkle: number
+  baseAlpha: number
+}
+
+type NeonBillboard = {
+  container: Phaser.GameObjects.Container
+  glow: Phaser.GameObjects.Ellipse
+  panel: Phaser.GameObjects.Rectangle
+  text: Phaser.GameObjects.Text
+  side: 'left' | 'right'
+  depth: number
+  label: string
+  tint: number
+}
+
 const MAX_UPGRADE_LEVEL = 3
-const PROFILE_KEY = 'asphalt-anger-profile-v6'
-const BEST_SCORE_KEY = 'asphalt-anger-best-v6'
+const PROFILE_KEY = 'asphalt-anger-profile-v7'
+const BEST_SCORE_KEY = 'asphalt-anger-best-v7'
 
 const DISTRICTS: Record<DistrictId, DistrictDef> = {
   residential: {
@@ -616,7 +640,7 @@ class MenuScene extends Phaser.Scene {
         '• Portrait mobile controls',
         '• District system and garage upgrades',
         '• Street lights, stop signs, smoke weapon',
-        '• Texting Thomas, Turning Tina, Switch Lane Jane',
+        '• Neon skyline, billboards, haze, road reflections',
       ].join('\n'),
       {
         fontFamily: 'Arial Black',
@@ -1338,6 +1362,14 @@ class GameScene extends Phaser.Scene {
   private rainDrops: Phaser.GameObjects.Rectangle[] = []
   private weatherFlashTimer = 0
 
+  private roadFxGraphics!: Phaser.GameObjects.Graphics
+  private horizonHaze!: Phaser.GameObjects.Ellipse
+  private cinematicGlowOverlay!: Phaser.GameObjects.Rectangle
+  private vignetteOverlay!: Phaser.GameObjects.Rectangle
+  private stars: AmbientStar[] = []
+  private skylineTwinkles: SkylineTwinkle[] = []
+  private billboards: NeonBillboard[] = []
+
   private trafficWaveTimer = 10
   private trafficWaveCount = 0
 
@@ -1566,6 +1598,116 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+
+  private getNightIntensity() {
+    if (this.currentDistrict.id === 'entertainment') return 1
+    if (this.currentDistrict.id === 'downtown') return 0.9
+    if (this.currentDistrict.id === 'highway') return 0.72
+    if (this.currentDistrict.id === 'industrial') return 0.56
+    if (this.currentDistrict.id === 'shopping') return 0.5
+    return 0.3
+  }
+
+  private randomBillboardLabel() {
+    const labels = ['LOCK IN', 'RUSH', "BOB'S", '24/7', 'BURN', 'CITY', 'NITRO', 'ANGER']
+    return labels[Phaser.Math.Between(0, labels.length - 1)]
+  }
+
+  private createNeonBillboard(label: string, tint: number) {
+    const container = this.add.container(0, 0)
+
+    const glow = this.add.ellipse(0, 0, 164, 96, tint, 0.14)
+    glow.setBlendMode(Phaser.BlendModes.ADD)
+
+    const pole = this.add.rectangle(0, 64, 8, 88, 0x2b2f38, 0.98)
+    const frame = this.add.rectangle(0, 0, 122, 66, 0x07090d, 0.96)
+    frame.setStrokeStyle(3, tint, 0.8)
+
+    const panel = this.add.rectangle(0, 0, 112, 56, tint, 0.16)
+    const stripe = this.add.rectangle(0, 18, 92, 4, 0xffffff, 0.12)
+    const footer = this.add.rectangle(0, 28, 74, 4, tint, 0.46)
+
+    const text = this.add.text(0, -4, label, {
+      fontFamily: 'Arial Black',
+      fontSize: '16px',
+      color: '#fff4d8',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5)
+
+    container.add([glow, pole, frame, panel, stripe, footer, text])
+
+    return {
+      container,
+      glow,
+      panel,
+      text,
+      side: Phaser.Math.Between(0, 1) === 0 ? 'left' : 'right',
+      depth: Phaser.Math.FloatBetween(0.06, 0.24),
+      label,
+      tint,
+    } satisfies NeonBillboard
+  }
+
+  private resetBillboard(billboard: NeonBillboard) {
+    billboard.side = Phaser.Math.Between(0, 1) === 0 ? 'left' : 'right'
+    billboard.depth = Phaser.Math.FloatBetween(0.06, 0.22)
+    billboard.label = this.randomBillboardLabel()
+    billboard.tint = this.currentDistrict.accentColor
+    billboard.text.setText(billboard.label)
+    billboard.panel.setFillStyle(billboard.tint, 0.16)
+    billboard.glow.setFillStyle(billboard.tint, 0.14 + this.currentDistrict.lightStrength * 0.16)
+  }
+
+  private updateShowcaseGraphics(time: number, delta: number) {
+    const { width, height } = this.scale
+    const night = this.getNightIntensity()
+
+    for (const star of this.stars) {
+      star.dot.x += star.drift * (delta / 1000)
+      if (star.dot.x < -8) star.dot.x = width + 8
+      if (star.dot.x > width + 8) star.dot.x = -8
+
+      const twinkle = 0.62 + Math.sin(time * 0.0018 + star.twinkle) * 0.38
+      star.dot.alpha = (0.04 + night * 0.32) * twinkle
+    }
+
+    for (const windowLight of this.skylineTwinkles) {
+      const pulse = 0.6 + Math.sin(time * 0.003 + windowLight.twinkle) * 0.4
+      windowLight.light.alpha = windowLight.baseAlpha * pulse * (0.4 + night * 0.9)
+    }
+
+    for (const billboard of this.billboards) {
+      billboard.depth += this.roadSpeed * 0.48 * (0.56 + billboard.depth * 1.24) * (delta / 1000)
+      if (billboard.depth > 1.05) this.resetBillboard(billboard)
+
+      const p = this.project(billboard.depth)
+      billboard.container.x = this.roadEdgeX(
+        billboard.side,
+        billboard.depth,
+        Phaser.Math.Linear(96, 212, p.eased),
+      )
+      billboard.container.y = p.y - Phaser.Math.Linear(84, 208, p.eased)
+      billboard.container.setScale(Phaser.Math.Linear(0.22, 1.2, p.eased))
+      billboard.container.setAlpha(Phaser.Math.Linear(0.18, 1, p.eased))
+      billboard.container.setDepth(Math.floor(p.y) + 2)
+
+      billboard.panel.setFillStyle(billboard.tint, 0.12 + night * 0.08)
+      billboard.glow.setFillStyle(billboard.tint, 0.08 + night * 0.16 + (this.rushActive ? 0.05 : 0))
+      billboard.glow.alpha = 0.08 + night * 0.14 + (this.rushActive ? 0.06 : 0)
+    }
+
+    this.horizonHaze.alpha = 0.06 + night * 0.14 + (this.weatherMode === 'fog' ? 0.1 : 0)
+    this.sunOuter.setScale(1 + Math.sin(time * 0.0009) * 0.018)
+    this.sunInner.setScale(1 + Math.sin(time * 0.0012 + 0.8) * 0.022)
+
+    this.cinematicGlowOverlay.alpha = Math.min(
+      0.24,
+      0.03 + night * 0.03 + this.anger * 0.001 + (this.rushActive ? 0.08 : 0),
+    )
+
+    this.vignetteOverlay.alpha = 0.05 + night * 0.04 + (this.weatherMode === 'storm' ? 0.03 : 0)
+  }
 
   private refreshWeatherMode() {
     if (this.currentDistrict.id === 'highway' || this.currentDistrict.id === 'downtown') {
@@ -1923,6 +2065,9 @@ class GameScene extends Phaser.Scene {
     const bodyGlow = this.add.rectangle(0, 0, 100, 160, 0xff8f3a, 0.14)
     bodyGlow.setBlendMode(Phaser.BlendModes.ADD)
 
+    const underGlow = this.add.ellipse(0, 40, 88, 34, 0xff7a2f, 0.16)
+    underGlow.setBlendMode(Phaser.BlendModes.ADD)
+
     const bed = this.add.rectangle(0, 12, 80, 120, 0x6d4d35)
     bed.setStrokeStyle(4, 0x000000)
 
@@ -1971,6 +2116,7 @@ class GameScene extends Phaser.Scene {
 
     truck.add([
       bodyGlow,
+      underGlow,
       bed,
       sideStripe,
       cabin,
@@ -2541,6 +2687,15 @@ class GameScene extends Phaser.Scene {
 
     this.refreshWeatherMode()
 
+    this.horizonHaze.setFillStyle(district.accentColor, 0.08 + district.lightStrength * 0.22)
+    this.cinematicGlowOverlay.setFillStyle(district.accentColor, 0.02)
+
+    for (const billboard of this.billboards) {
+      billboard.tint = district.accentColor
+      billboard.panel.setFillStyle(district.accentColor, 0.16)
+      billboard.glow.setFillStyle(district.accentColor, 0.12 + district.lightStrength * 0.18)
+    }
+
     this.districtText.setText(`DISTRICT: ${district.name}`)
     this.districtText.setColor(hexColor(district.accentColor))
     this.routeText.setText(this.mission.route.map((districtId) => DISTRICTS[districtId].name).join(' → '))
@@ -2630,9 +2785,11 @@ class GameScene extends Phaser.Scene {
 
   private drawRoad() {
     const g = this.roadGraphics
+    const fx = this.roadFxGraphics
     const district = this.currentDistrict
 
     g.clear()
+    fx.clear()
 
     const top = this.project(0)
     const bottom = this.project(1)
@@ -2677,6 +2834,26 @@ class GameScene extends Phaser.Scene {
     g.lineTo(bottom.right - 6, bottom.y)
     g.strokePath()
 
+    fx.fillStyle(district.accentColor, 0.06 + this.currentDistrict.lightStrength * 0.08)
+    fx.beginPath()
+    fx.moveTo(this.centerX - 18, top.y)
+    fx.lineTo(this.centerX + 18, top.y)
+    fx.lineTo(this.centerX + 74, bottom.y)
+    fx.lineTo(this.centerX - 74, bottom.y)
+    fx.closePath()
+    fx.fillPath()
+
+    fx.lineStyle(10, district.accentColor, 0.08 + this.currentDistrict.lightStrength * 0.08)
+    fx.beginPath()
+    fx.moveTo(top.left - 18, top.y)
+    fx.lineTo(bottom.left - 30, bottom.y)
+    fx.strokePath()
+
+    fx.beginPath()
+    fx.moveTo(top.right + 18, top.y)
+    fx.lineTo(bottom.right + 30, bottom.y)
+    fx.strokePath()
+
     for (const divider of [1, 2]) {
       for (const dashDepth of this.dashDepths) {
         const d1 = dashDepth
@@ -2698,6 +2875,33 @@ class GameScene extends Phaser.Scene {
         g.lineTo(x2, p2.y)
         g.strokePath()
       }
+    }
+
+    for (const glossDepth of this.dashDepths.slice(0, 4)) {
+      const d1 = glossDepth
+      const d2 = Math.min(1, glossDepth + 0.035)
+      const p1 = this.project(d1)
+      const p2 = this.project(d2)
+      const w1 = Phaser.Math.Linear(6, 44, p1.eased)
+      const w2 = Phaser.Math.Linear(10, 72, p2.eased)
+
+      fx.fillStyle(0xffffff, 0.018 + p1.eased * 0.045)
+      fx.beginPath()
+      fx.moveTo(this.centerX - w1, p1.y)
+      fx.lineTo(this.centerX + w1, p1.y)
+      fx.lineTo(this.centerX + w2, p2.y)
+      fx.lineTo(this.centerX - w2, p2.y)
+      fx.closePath()
+      fx.fillPath()
+    }
+
+    for (const bandDepth of [0.18, 0.36, 0.58, 0.8]) {
+      const p = this.project(bandDepth)
+      fx.lineStyle(Phaser.Math.Linear(1, 5, p.eased), 0xffffff, 0.02 + p.eased * 0.03)
+      fx.beginPath()
+      fx.moveTo(p.left + 18, p.y)
+      fx.lineTo(p.right - 18, p.y)
+      fx.strokePath()
     }
   }
 
@@ -2871,6 +3075,25 @@ class GameScene extends Phaser.Scene {
     this.sunInner = this.add.circle(this.centerX, 220, 102, this.currentDistrict.sunInnerColor, 0.16)
     this.sunInner.setBlendMode(Phaser.BlendModes.ADD)
 
+    for (let i = 0; i < 28; i++) {
+      const star = this.add.circle(
+        Phaser.Math.Between(18, width - 18),
+        Phaser.Math.Between(26, 250),
+        Phaser.Math.Between(1, 3),
+        0xffffff,
+        0.22,
+      )
+      star.setBlendMode(Phaser.BlendModes.ADD)
+      this.stars.push({
+        dot: star,
+        twinkle: Phaser.Math.FloatBetween(0, Math.PI * 2),
+        drift: Phaser.Math.FloatBetween(-3, 3),
+      })
+    }
+
+    this.horizonHaze = this.add.ellipse(width / 2, this.horizonY + 46, width * 0.94, 190, this.currentDistrict.accentColor, 0.12)
+    this.horizonHaze.setBlendMode(Phaser.BlendModes.ADD)
+
     for (let i = 0; i < 18; i++) {
       const bw = Phaser.Math.Between(28, 78)
       const bh = Phaser.Math.Between(120, 320)
@@ -2892,7 +3115,32 @@ class GameScene extends Phaser.Scene {
       }
     }
 
+    for (let i = 0; i < 42; i++) {
+      const light = this.add.rectangle(
+        Phaser.Math.Between(18, width - 18),
+        Phaser.Math.Between(118, 334),
+        Phaser.Math.Between(3, 7),
+        Phaser.Math.Between(7, 14),
+        0xffcf7b,
+        0.2,
+      )
+      light.setBlendMode(Phaser.BlendModes.ADD)
+      this.skylineTwinkles.push({
+        light,
+        twinkle: Phaser.Math.FloatBetween(0, Math.PI * 2),
+        baseAlpha: Phaser.Math.FloatBetween(0.12, 0.28),
+      })
+    }
+
+    for (let i = 0; i < 4; i++) {
+      const billboard = this.createNeonBillboard(this.randomBillboardLabel(), this.currentDistrict.accentColor)
+      billboard.side = i % 2 === 0 ? 'left' : 'right'
+      billboard.depth = 0.08 + i * 0.16
+      this.billboards.push(billboard)
+    }
+
     this.roadGraphics = this.add.graphics()
+    this.roadFxGraphics = this.add.graphics()
     this.angerFlameGraphics = this.add.graphics()
     this.angerFlameGraphics.setBlendMode(Phaser.BlendModes.ADD)
 
@@ -3170,6 +3418,11 @@ class GameScene extends Phaser.Scene {
     this.weatherTintOverlay = this.add.rectangle(width / 2, height / 2, width, height, 0x9fc6ff, 0)
     this.weatherTintOverlay.setBlendMode(Phaser.BlendModes.SCREEN)
 
+    this.cinematicGlowOverlay = this.add.rectangle(width / 2, height / 2, width, height, this.currentDistrict.accentColor, 0.02)
+    this.cinematicGlowOverlay.setBlendMode(Phaser.BlendModes.ADD)
+
+    this.vignetteOverlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.07)
+
     for (let i = 0; i < 56; i++) {
       const drop = this.add.rectangle(
         Phaser.Math.Between(0, width),
@@ -3248,6 +3501,7 @@ class GameScene extends Phaser.Scene {
         const pulse = 1 + Math.sin(time * 0.008 + 0.6) * 0.04
         this.mobileRushButtonRing.setScale(pulse)
       }
+      this.updateShowcaseGraphics(time, delta)
       return
     }
 
@@ -3335,6 +3589,7 @@ class GameScene extends Phaser.Scene {
     }
 
     this.drawRoad()
+    this.updateShowcaseGraphics(time, delta)
 
     for (const light of this.roadLights) {
       light.depth += this.roadSpeed * 0.95 * (0.55 + light.depth * 1.8) * (delta / 1000)
@@ -3861,6 +4116,7 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
 
 
