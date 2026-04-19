@@ -1660,7 +1660,7 @@ class GameScene extends Phaser.Scene {
   }
 
   private updateShowcaseGraphics(time: number, delta: number) {
-    const { width, height } = this.scale
+    const { width } = this.scale
     const night = this.getNightIntensity()
 
     for (const star of this.stars) {
@@ -1939,7 +1939,6 @@ class GameScene extends Phaser.Scene {
         warningShown: true,
       }
 
-      boss.container.setTint(0xff8c96)
       boss.container.setData('nearMissed', false)
       boss.container.setData('lastSmokeCloudId', -1)
 
@@ -4116,6 +4115,7 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
 
 
