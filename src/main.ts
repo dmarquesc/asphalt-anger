@@ -121,8 +121,8 @@ type Pedestrian = {
 }
 
 const MAX_UPGRADE_LEVEL = 3
-const PROFILE_KEY = 'asphalt-anger-profile-v5'
-const BEST_SCORE_KEY = 'asphalt-anger-best-v5'
+const PROFILE_KEY = 'asphalt-anger-profile-v6'
+const BEST_SCORE_KEY = 'asphalt-anger-best-v6'
 
 const DISTRICTS: Record<DistrictId, DistrictDef> = {
   residential: {
@@ -423,6 +423,53 @@ function enemyColors(kind: EnemyKind) {
   return { body: 0x2ecf79, roof: 0x8cffc0 }
 }
 
+function createActionButton(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  label: string,
+  onPress: () => void,
+  fill = 0xff7a2f,
+  textColor = '#fff3df',
+) {
+  const bg = scene.add.rectangle(x, y, width, height, fill, 0.92)
+  bg.setStrokeStyle(3, 0x000000, 0.45)
+  bg.setInteractive({ useHandCursor: true })
+
+  const text = scene.add.text(x, y, label, {
+    fontFamily: 'Arial Black',
+    fontSize: '18px',
+    color: textColor,
+    stroke: '#000000',
+    strokeThickness: 5,
+    align: 'center',
+  }).setOrigin(0.5)
+
+  const pulseIn = () => {
+    bg.setScale(0.98)
+    text.setScale(0.98)
+  }
+
+  const pulseOut = () => {
+    bg.setScale(1)
+    text.setScale(1)
+  }
+
+  bg.on('pointerdown', () => {
+    pulseIn()
+    onPress()
+  })
+  bg.on('pointerup', pulseOut)
+  bg.on('pointerout', pulseOut)
+  bg.on('pointerover', () => {
+    bg.setFillStyle(fill, 1)
+  })
+
+  return { bg, text }
+}
+
 class BootScene extends Phaser.Scene {
   constructor() {
     super('BootScene')
@@ -487,7 +534,7 @@ class MenuScene extends Phaser.Scene {
       strokeThickness: 10,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, 128, 'Portrait-first mobile city route prototype', {
+    this.add.text(width / 2, 128, 'Mission flow polish + mobile-ready prototype', {
       fontFamily: 'Arial Black',
       fontSize: '18px',
       color: '#ffe0be',
@@ -522,7 +569,7 @@ class MenuScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5)
 
-    const infoBox = this.add.rectangle(width / 2, 700, 610, 255, 0x0f1015, 0.9)
+    const infoBox = this.add.rectangle(width / 2, 704, 610, 255, 0x0f1015, 0.9)
     infoBox.setStrokeStyle(3, 0xff8a3d, 0.28)
 
     this.add.text(width / 2, 606, 'THIS BUILD', {
@@ -537,11 +584,10 @@ class MenuScene extends Phaser.Scene {
       width / 2,
       726,
       [
+        '• Mission briefing scene before each run',
+        '• Clickable post-mission buttons so no freeze feeling',
         '• Portrait mobile controls',
-        '• Left and right thumb buttons',
-        '• Swipe up and down for speed',
-        '• District system and map',
-        '• Garage upgrades',
+        '• District system and garage upgrades',
         '• Street lights, stop signs, smoke weapon',
         '• Texting Thomas, Turning Tina, Switch Lane Jane',
       ].join('\n'),
@@ -555,29 +601,13 @@ class MenuScene extends Phaser.Scene {
       },
     ).setOrigin(0.5)
 
-    const mapText = this.add.text(width / 2, height - 120, 'PRESS SPACE OR TAP FOR MAP', {
-      fontFamily: 'Arial Black',
-      fontSize: '28px',
-      color: '#ffe082',
-      stroke: '#000000',
-      strokeThickness: 6,
-    }).setOrigin(0.5)
-
-    const garageText = this.add.text(width / 2, height - 78, 'PRESS G FOR GARAGE', {
-      fontFamily: 'Arial Black',
-      fontSize: '20px',
-      color: '#8df0ff',
-      stroke: '#000000',
-      strokeThickness: 5,
-    }).setOrigin(0.5)
-
-    this.tweens.add({
-      targets: [mapText, garageText],
-      alpha: 0.42,
-      yoyo: true,
-      repeat: -1,
-      duration: 700,
+    createActionButton(this, width / 2, height - 116, 320, 54, 'OPEN CITY MAP', () => {
+      this.scene.start('MapScene')
     })
+
+    createActionButton(this, width / 2, height - 56, 220, 44, 'GARAGE', () => {
+      this.scene.start('GarageScene')
+    }, 0x2d6fd6, '#eff8ff')
 
     this.input.keyboard?.once('keydown-SPACE', () => {
       this.scene.start('MapScene')
@@ -585,10 +615,6 @@ class MenuScene extends Phaser.Scene {
 
     this.input.keyboard?.once('keydown-G', () => {
       this.scene.start('GarageScene')
-    })
-
-    this.input.once('pointerdown', () => {
-      this.scene.start('MapScene')
     })
   }
 }
@@ -673,26 +699,18 @@ class MapScene extends Phaser.Scene {
       if (unlocked) {
         panel.setInteractive({ useHandCursor: true })
         panel.on('pointerdown', () => {
-          this.scene.start('GameScene', { missionId: mission.id })
+          this.scene.start('BriefingScene', { missionId: mission.id })
         })
       }
     })
 
-    this.add.text(width / 2, height - 82, 'NUMBER KEYS 1 TO 5 START UNLOCKED DESTINATIONS', {
-      fontFamily: 'Arial Black',
-      fontSize: '16px',
-      color: '#ffe082',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5)
+    createActionButton(this, width / 2, height - 84, 250, 48, 'GARAGE', () => {
+      this.scene.start('GarageScene')
+    }, 0x2d6fd6, '#eff8ff')
 
-    this.add.text(width / 2, height - 48, 'G GARAGE   M MENU', {
-      fontFamily: 'Arial Black',
-      fontSize: '16px',
-      color: '#8df0ff',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5)
+    createActionButton(this, width / 2, height - 30, 250, 42, 'MENU', () => {
+      this.scene.start('MenuScene')
+    }, 0x3b3f48, '#ffffff')
 
     this.input.keyboard?.on('keydown-ONE', () => this.tryStartMission(0))
     this.input.keyboard?.on('keydown-TWO', () => this.tryStartMission(1))
@@ -706,7 +724,163 @@ class MapScene extends Phaser.Scene {
   private tryStartMission(index: number) {
     const profile = loadProfile()
     if (index > profile.unlockedMission) return
-    this.scene.start('GameScene', { missionId: MISSIONS[index].id })
+    this.scene.start('BriefingScene', { missionId: MISSIONS[index].id })
+  }
+}
+
+class BriefingScene extends Phaser.Scene {
+  constructor() {
+    super('BriefingScene')
+  }
+
+  create(data?: { missionId?: string }) {
+    const { width, height } = this.scale
+    const mission = getMissionById(data?.missionId)
+    const profile = loadProfile()
+
+    this.cameras.main.setBackgroundColor('#06080d')
+    this.add.rectangle(width / 2, height / 2, width, height, 0x06080d, 1)
+
+    this.add.circle(width / 2, 188, 160, 0xff7a2f, 0.08).setBlendMode(Phaser.BlendModes.ADD)
+    this.add.circle(width / 2, 188, 92, 0xffd08b, 0.12).setBlendMode(Phaser.BlendModes.ADD)
+
+    this.add.text(width / 2, 56, 'MISSION BRIEFING', {
+      fontFamily: 'Arial Black',
+      fontSize: '38px',
+      color: '#ffcb8e',
+      stroke: '#000000',
+      strokeThickness: 8,
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 116, mission.title.toUpperCase(), {
+      fontFamily: 'Arial Black',
+      fontSize: '30px',
+      color: '#8df0ff',
+      stroke: '#000000',
+      strokeThickness: 6,
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 158, mission.description, {
+      fontFamily: 'Arial Black',
+      fontSize: '16px',
+      color: '#ffe0be',
+      stroke: '#000000',
+      strokeThickness: 4,
+      align: 'center',
+    }).setOrigin(0.5)
+
+    const panel = this.add.rectangle(width / 2, 432, 620, 430, 0x0f1319, 0.92)
+    panel.setStrokeStyle(3, 0xff8a3d, 0.3)
+
+    this.add.text(width / 2, 252, `DESTINATION: ${mission.destination}`, {
+      fontFamily: 'Arial Black',
+      fontSize: '18px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 286, `DISTANCE: ${mission.distance.toFixed(1)} MI`, {
+      fontFamily: 'Arial Black',
+      fontSize: '18px',
+      color: '#ffe082',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 320, `TIME LIMIT: ${mission.timeLimit} SEC`, {
+      fontFamily: 'Arial Black',
+      fontSize: '18px',
+      color: '#8df0ff',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 354, `ROUTE: ${mission.route.map((districtId) => DISTRICTS[districtId].name).join(' → ')}`, {
+      fontFamily: 'Arial Black',
+      fontSize: '15px',
+      color: '#ffd7b0',
+      stroke: '#000000',
+      strokeThickness: 4,
+      align: 'center',
+    }).setOrigin(0.5)
+
+    this.add.text(width / 2, 402, 'YOUR RIG', {
+      fontFamily: 'Arial Black',
+      fontSize: '24px',
+      color: '#ffcb8e',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5)
+
+    const engineBonus = `${Math.round(profile.engine * 6)}%`
+    const laneMs = Math.max(80, 136 - profile.tires * 18)
+    const hull = 1 + profile.armor
+    const magnetRange = 72 + profile.magnet * 22
+
+    this.add.text(
+      width / 2,
+      506,
+      [
+        'Vehicle: OLD TOW TRUCK',
+        `Engine bonus: ${engineBonus}`,
+        `Lane change: ${laneMs} ms`,
+        `Hull: ${hull}`,
+        `Magnet range: ${magnetRange}`,
+      ].join('\n'),
+      {
+        fontFamily: 'Arial Black',
+        fontSize: '18px',
+        color: '#ffffff',
+        stroke: '#000000',
+        strokeThickness: 4,
+        align: 'center',
+      },
+    ).setOrigin(0.5)
+
+    this.add.text(width / 2, 642, 'CONTROLS', {
+      fontFamily: 'Arial Black',
+      fontSize: '24px',
+      color: '#ffcb8e',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5)
+
+    this.add.text(
+      width / 2,
+      738,
+      [
+        'Desktop: ← → move lanes, ↑ ↓ pace, Z honk, X smoke',
+        'Mobile: left/right thumb buttons, swipe up/down, smoke button',
+        'Tip: take a second, set your hands, then launch the mission',
+      ].join('\n'),
+      {
+        fontFamily: 'Arial Black',
+        fontSize: '15px',
+        color: '#ffe0be',
+        stroke: '#000000',
+        strokeThickness: 4,
+        align: 'center',
+      },
+    ).setOrigin(0.5)
+
+    createActionButton(this, width / 2, height - 118, 330, 56, 'START MISSION', () => {
+      this.scene.start('GameScene', { missionId: mission.id })
+    })
+
+    createActionButton(this, width / 2, height - 56, 240, 44, 'BACK TO MAP', () => {
+      this.scene.start('MapScene')
+    }, 0x3b3f48, '#ffffff')
+
+    this.input.keyboard?.once('keydown-ENTER', () => {
+      this.scene.start('GameScene', { missionId: mission.id })
+    })
+    this.input.keyboard?.once('keydown-SPACE', () => {
+      this.scene.start('GameScene', { missionId: mission.id })
+    })
+    this.input.keyboard?.once('keydown-ESC', () => {
+      this.scene.start('MapScene')
+    })
   }
 }
 
@@ -848,7 +1022,7 @@ class GarageScene extends Phaser.Scene {
       this.costTexts[key] = costText
     })
 
-    this.add.text(width / 2, height - 110, 'OLD TOW TRUCK   →   RUSTY SEDAN [LOCKED]   →   WORK VAN [LOCKED]', {
+    this.add.text(width / 2, height - 140, 'OLD TOW TRUCK   →   RUSTY SEDAN [LOCKED]   →   WORK VAN [LOCKED]', {
       fontFamily: 'Arial Black',
       fontSize: '16px',
       color: '#ffe8bc',
@@ -856,21 +1030,25 @@ class GarageScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, height - 76, '1 ENGINE   2 TIRES   3 ARMOR   4 MAGNET   ENTER FOR MAP', {
-      fontFamily: 'Arial Black',
-      fontSize: '15px',
-      color: '#8df0ff',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5)
-
-    this.statusText = this.add.text(width / 2, height - 42, 'BUILD YOUR TOW TRUCK', {
+    this.statusText = this.add.text(width / 2, height - 104, 'BUILD YOUR TOW TRUCK', {
       fontFamily: 'Arial Black',
       fontSize: '18px',
       color: '#ffe082',
       stroke: '#000000',
       strokeThickness: 5,
     }).setOrigin(0.5)
+
+    createActionButton(this, width / 2, height - 54, 320, 52, 'START NEXT ROUTE', () => {
+      this.scene.start('MapScene')
+    })
+
+    createActionButton(this, width - 110, height - 104, 170, 40, 'MENU', () => {
+      this.scene.start('MenuScene')
+    }, 0x3b3f48, '#ffffff')
+
+    createActionButton(this, 110, height - 104, 170, 40, 'MAP', () => {
+      this.scene.start('MapScene')
+    }, 0x2d6fd6, '#eff8ff')
 
     this.input.keyboard?.on('keydown-ONE', () => this.buyUpgrade('engine'))
     this.input.keyboard?.on('keydown-TWO', () => this.buyUpgrade('tires'))
@@ -924,12 +1102,7 @@ class GarageScene extends Phaser.Scene {
     const engineBonus = `${Math.round(this.profile.engine * 6)}%`
 
     this.statText.setText(
-      `Tow Truck Stats
-Engine Bonus: ${engineBonus}
-Lane Change: ${laneMs} ms
-Hull: ${hull}
-Magnet Range: ${magnetRange}
-Unlocked Destinations: ${this.profile.unlockedMission + 1}/${MISSIONS.length}`,
+      `Tow Truck Stats\nEngine Bonus: ${engineBonus}\nLane Change: ${laneMs} ms\nHull: ${hull}\nMagnet Range: ${magnetRange}\nUnlocked Destinations: ${this.profile.unlockedMission + 1}/${MISSIONS.length}`,
     )
 
     ;(['engine', 'tires', 'armor', 'magnet'] as UpgradeKey[]).forEach((key) => {
@@ -970,7 +1143,7 @@ class GameOverScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#050505')
     this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.72)
 
-    this.add.text(width / 2, height / 2 - 152, reason, {
+    this.add.text(width / 2, height / 2 - 172, reason, {
       fontFamily: 'Arial Black',
       fontSize: '48px',
       color: '#ff5a1f',
@@ -978,7 +1151,7 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 10,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, height / 2 - 104, missionName, {
+    this.add.text(width / 2, height / 2 - 120, missionName, {
       fontFamily: 'Arial Black',
       fontSize: '20px',
       color: '#ffe0be',
@@ -986,7 +1159,7 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, height / 2 - 20, `SCORE: ${score}`, {
+    this.add.text(width / 2, height / 2 - 26, `SCORE: ${score}`, {
       fontFamily: 'Arial Black',
       fontSize: '28px',
       color: '#ffffff',
@@ -994,7 +1167,7 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 6,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, height / 2 + 26, `SCRAP: ${scrap}`, {
+    this.add.text(width / 2, height / 2 + 18, `SCRAP: ${scrap}`, {
       fontFamily: 'Arial Black',
       fontSize: '22px',
       color: '#ffd7a3',
@@ -1002,7 +1175,7 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5)
 
-    this.add.text(width / 2, height / 2 + 68, `BEST: ${best}`, {
+    this.add.text(width / 2, height / 2 + 58, `BEST: ${best}`, {
       fontFamily: 'Arial Black',
       fontSize: '22px',
       color: '#b7ffd1',
@@ -1010,44 +1183,26 @@ class GameOverScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5)
 
-    const retryText = this.add.text(width / 2, height / 2 + 150, 'PRESS SPACE OR TAP TO RETRY', {
-      fontFamily: 'Arial Black',
-      fontSize: '22px',
-      color: '#ffe082',
-      stroke: '#000000',
-      strokeThickness: 5,
-    }).setOrigin(0.5)
-
-    const mapText = this.add.text(width / 2, height / 2 + 188, 'PRESS M FOR MAP   G FOR GARAGE', {
-      fontFamily: 'Arial Black',
-      fontSize: '18px',
-      color: '#8df0ff',
-      stroke: '#000000',
-      strokeThickness: 5,
-    }).setOrigin(0.5)
-
-    this.tweens.add({
-      targets: [retryText, mapText],
-      alpha: 0.4,
-      yoyo: true,
-      repeat: -1,
-      duration: 720,
+    createActionButton(this, width / 2, height / 2 + 150, 330, 54, 'RETRY MISSION', () => {
+      this.scene.start('GameScene', { missionId })
     })
+
+    createActionButton(this, width / 2, height / 2 + 214, 260, 46, 'BACK TO MAP', () => {
+      this.scene.start('MapScene')
+    }, 0x2d6fd6, '#eff8ff')
+
+    createActionButton(this, width / 2, height / 2 + 270, 220, 42, 'GARAGE', () => {
+      this.scene.start('GarageScene')
+    }, 0x3b3f48, '#ffffff')
 
     this.input.keyboard?.once('keydown-SPACE', () => {
       this.scene.start('GameScene', { missionId })
     })
-
     this.input.keyboard?.once('keydown-M', () => {
       this.scene.start('MapScene')
     })
-
     this.input.keyboard?.once('keydown-G', () => {
       this.scene.start('GarageScene')
-    })
-
-    this.input.once('pointerdown', () => {
-      this.scene.start('GameScene', { missionId })
     })
   }
 }
@@ -2052,7 +2207,7 @@ class GameScene extends Phaser.Scene {
       cash: cashReward,
     }
 
-    this.time.delayedCall(320, () => {
+    this.time.delayedCall(380, () => {
       this.scene.start('GarageScene', { rewards })
     })
   }
@@ -2967,7 +3122,8 @@ const config: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, MenuScene, MapScene, GarageScene, GameOverScene, GameScene],
+  scene: [BootScene, MenuScene, MapScene, BriefingScene, GarageScene, GameOverScene, GameScene],
 }
 
 new Phaser.Game(config)
+
