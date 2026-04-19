@@ -1323,7 +1323,6 @@ class GameScene extends Phaser.Scene {
   private keyC!: Phaser.Input.Keyboard.Key
 
   private rushReadyText!: Phaser.GameObjects.Text
-  private rushMeterBg!: Phaser.GameObjects.Rectangle
   private rushMeterFill!: Phaser.GameObjects.Rectangle
   private rushActive = false
   private rushTimer = 0
@@ -3186,7 +3185,7 @@ class GameScene extends Phaser.Scene {
       this.rainDrops.push(drop)
     }
 
-    this.rushMeterBg = this.add.rectangle(width - 146, 126, 116, 12, 0x000000, 0.62).setOrigin(0, 0.5)
+    this.add.rectangle(width - 146, 126, 116, 12, 0x000000, 0.62).setOrigin(0, 0.5)
     this.rushMeterFill = this.add.rectangle(width - 144, 126, 0, 8, 0xff9b3d, 1).setOrigin(0, 0.5)
 
     this.add.text(width - 18, 92, 'C RUSH', {
@@ -3862,6 +3861,7 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
 
 
