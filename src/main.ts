@@ -122,6 +122,22 @@ type Pedestrian = {
 
 type WeatherMode = 'clear' | 'rain' | 'storm' | 'fog'
 
+type BossRivalState = 'inactive' | 'warning' | 'active' | 'defeated'
+
+type SetPieceKind = 'bus' | 'construction' | 'roadblock' | 'delivery' | 'concert'
+
+type SetPieceHazard = {
+  container: Phaser.GameObjects.Container
+  shadow: Phaser.GameObjects.Ellipse
+  laneIndex: number
+  depth: number
+  speed: number
+  label: string
+  kind: SetPieceKind
+  active: boolean
+  passed: boolean
+}
+
 const MAX_UPGRADE_LEVEL = 3
 const PROFILE_KEY = 'asphalt-anger-profile-v6'
 const BEST_SCORE_KEY = 'asphalt-anger-best-v6'
@@ -423,6 +439,15 @@ function enemyColors(kind: EnemyKind) {
   if (kind === 'turning') return { body: 0xff9b2f, roof: 0xffcf7b }
   if (kind === 'switchlane') return { body: 0xd9343a, roof: 0xff858f }
   return { body: 0x2ecf79, roof: 0x8cffc0 }
+}
+
+function setPieceStyleForDistrict(districtId: DistrictId) {
+  if (districtId === 'residential') return { kind: 'bus' as SetPieceKind, label: 'SCHOOL BUS', color: 0xf4c542 }
+  if (districtId === 'industrial') return { kind: 'construction' as SetPieceKind, label: 'WORK ZONE', color: 0xff8a3d }
+  if (districtId === 'highway') return { kind: 'roadblock' as SetPieceKind, label: 'ROADBLOCK', color: 0xa7c7ff }
+  if (districtId === 'shopping') return { kind: 'delivery' as SetPieceKind, label: 'DELIVERY VAN', color: 0xd5a07b }
+  if (districtId === 'entertainment') return { kind: 'concert' as SetPieceKind, label: 'STAGE TRUCK', color: 0xff76c8 }
+  return { kind: 'delivery' as SetPieceKind, label: 'TAXI JAM', color: 0xffd86e }
 }
 
 function createActionButton(
@@ -1317,6 +1342,19 @@ class GameScene extends Phaser.Scene {
   private trafficWaveTimer = 10
   private trafficWaveCount = 0
 
+  private rivalBoss?: EnemyCar
+  private rivalBossState: BossRivalState = 'inactive'
+  private rivalBossName = 'MAD DOG MARCUS'
+  private rivalBossHull = 0
+  private rivalBossMaxHull = 0
+  private rivalBossTriggered = false
+  private rivalBossBarBg!: Phaser.GameObjects.Rectangle
+  private rivalBossBarFill!: Phaser.GameObjects.Rectangle
+  private rivalBossText!: Phaser.GameObjects.Text
+
+  private setPieceHazards: SetPieceHazard[] = []
+  private setPieceTriggeredCount = 0
+
   private dashDepths: number[] = []
 
   private roadSpeed = 0.36
@@ -1637,6 +1675,208 @@ class GameScene extends Phaser.Scene {
     this.trafficWaveTimer = Math.max(6.5, 12 - this.trafficWaveCount * 0.42 + Phaser.Math.FloatBetween(-0.4, 1.2))
     this.showEnemyWarning(`WAVE ${this.trafficWaveCount} INCOMING`)
     this.spawnScorePopup(this.scale.width / 2, 214, `WAVE ${this.trafficWaveCount}`, '#ffcb8e')
+  }
+
+  private createSetPieceContainer(kind: SetPieceKind, label: string, color: number) {
+    const hazard = this.add.container(0, 0)
+
+    const glow = this.add.rectangle(0, 0, 108, 150, color, 0.14)
+    glow.setBlendMode(Phaser.BlendModes.ADD)
+
+    const body = this.add.rectangle(0, 0, 88, 132, color, 1)
+    body.setStrokeStyle(4, 0x000000)
+
+    const roof = this.add.rectangle(0, -24, 54, 26, 0xf2f2f2, 0.9)
+    roof.setStrokeStyle(2, 0x000000)
+
+    const stripe = this.add.rectangle(0, 8, 72, 10, 0x1a1a1a, 0.2)
+
+    const wheelFL = this.add.rectangle(-34, -24, 10, 22, 0x111111)
+    const wheelFR = this.add.rectangle(34, -24, 10, 22, 0x111111)
+    const wheelRL = this.add.rectangle(-34, 28, 10, 22, 0x111111)
+    const wheelRR = this.add.rectangle(34, 28, 10, 22, 0x111111)
+
+    const panel = this.add.rectangle(0, 44, 74, 20, 0x000000, 0.45)
+    const text = this.add.text(0, 44, label, {
+      fontFamily: 'Arial Black',
+      fontSize: '11px',
+      color: '#fff6df',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5)
+
+    hazard.add([glow, body, roof, stripe, wheelFL, wheelFR, wheelRL, wheelRR, panel, text])
+
+    if (kind === 'construction') {
+      const coneL = this.add.triangle(-22, -48, 0, 18, 10, -8, 20, 18, 0xfff1c8, 1)
+      coneL.setStrokeStyle(2, 0x000000)
+      const coneR = this.add.triangle(22, -48, 0, 18, 10, -8, 20, 18, 0xfff1c8, 1)
+      coneR.setStrokeStyle(2, 0x000000)
+      hazard.add([coneL, coneR])
+    } else if (kind === 'roadblock') {
+      const bar = this.add.rectangle(0, -46, 78, 12, 0xeef5ff, 0.95)
+      bar.setStrokeStyle(2, 0x000000)
+      hazard.add(bar)
+    } else if (kind === 'concert') {
+      const lightL = this.add.circle(-22, -46, 8, 0xff9ae0, 0.95)
+      const lightR = this.add.circle(22, -46, 8, 0x93ffd3, 0.95)
+      lightL.setBlendMode(Phaser.BlendModes.ADD)
+      lightR.setBlendMode(Phaser.BlendModes.ADD)
+      hazard.add([lightL, lightR])
+    }
+
+    return hazard
+  }
+
+  private spawnSetPieceForCurrentDistrict() {
+    const style = setPieceStyleForDistrict(this.currentDistrict.id)
+    const laneIndex = Phaser.Math.Between(0, 2)
+    const container = this.createSetPieceContainer(style.kind, style.label, style.color)
+    const shadow = this.add.ellipse(0, 0, 70, 20, 0x000000, 0.24)
+
+    const hazard: SetPieceHazard = {
+      container,
+      shadow,
+      laneIndex,
+      depth: 0.06,
+      speed: Phaser.Math.FloatBetween(0.23, 0.3),
+      label: style.label,
+      kind: style.kind,
+      active: true,
+      passed: false,
+    }
+
+    this.setPieceHazards.push(hazard)
+    this.showEnemyWarning(style.label)
+    this.spawnScorePopup(this.scale.width / 2, 214, style.label, '#ffddb0')
+  }
+
+  private maybeTriggerSetPiece(progress: number) {
+    const thresholds = [0.32, 0.68]
+    if (this.setPieceTriggeredCount >= thresholds.length) return
+
+    const nextThreshold = thresholds[this.setPieceTriggeredCount]
+    if (progress >= nextThreshold) {
+      this.setPieceTriggeredCount += 1
+      this.spawnSetPieceForCurrentDistrict()
+    }
+  }
+
+  private spawnRivalBoss() {
+    if (this.rivalBossTriggered) return
+
+    this.rivalBossTriggered = true
+    this.rivalBossState = 'warning'
+    this.rivalBossName =
+      this.mission.id === 'concert'
+        ? 'VIPER VINCE'
+        : this.mission.id === 'tire'
+          ? 'SHADY SHAWN'
+          : 'MAD DOG MARCUS'
+
+    this.time.delayedCall(900, () => {
+      const container = this.createEnemyCar('switchlane')
+      const badge = this.add.text(0, -86, this.rivalBossName, {
+        fontFamily: 'Arial Black',
+        fontSize: '12px',
+        color: '#ffd7b0',
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5)
+      const badgeBg = this.add.rectangle(0, -86, badge.width + 18, 18, 0x000000, 0.44)
+      container.add([badgeBg, badge])
+
+      const shadow = this.add.ellipse(0, 0, 62, 18, 0x000000, 0.26)
+      const boss: EnemyCar = {
+        container,
+        shadow,
+        laneIndex: Phaser.Math.Between(0, 2),
+        depth: 0.08,
+        speed: 0.3,
+        kind: 'switchlane',
+        switchCooldown: 0.6,
+        warningShown: true,
+      }
+
+      boss.container.setTint(0xff8c96)
+      boss.container.setData('nearMissed', false)
+      boss.container.setData('lastSmokeCloudId', -1)
+
+      this.rivalBoss = boss
+      this.rivalBossState = 'active'
+      this.rivalBossMaxHull = 5
+      this.rivalBossHull = this.rivalBossMaxHull
+      this.showEnemyWarning(`${this.rivalBossName} IS ON YOU`)
+      this.showBobReaction('RIVAL INCOMING!')
+      this.rivalBossBarBg.setAlpha(0.7)
+      this.rivalBossText.setAlpha(1)
+      this.rivalBossText.setText(this.rivalBossName)
+    })
+  }
+
+  private damageRivalBoss(amount: number, x: number, y: number, label = 'HIT') {
+    if (!this.rivalBoss || this.rivalBossState !== 'active') return
+
+    this.rivalBossHull = Math.max(0, this.rivalBossHull - amount)
+    this.spawnSparkBurst(x, y, 0xffe2a8)
+    this.spawnScorePopup(x, y - 10, label, '#ffe8bc')
+    this.score += 220 * amount + this.combo * 20
+    this.addCombo()
+
+    if (this.rivalBossHull <= 0) {
+      this.rivalBossState = 'defeated'
+      this.showBobReaction('RIVAL DROPPED!')
+      this.showEnemyWarning(`${this.rivalBossName} WIPED OUT`)
+      this.cameras.main.flash(140, 255, 230, 180)
+      this.score += 900
+      this.scrapCount += 3
+      this.scrapText.setText(`SCRAP: ${this.scrapCount}`)
+
+      this.tweens.add({
+        targets: [this.rivalBoss.container, this.rivalBoss.shadow],
+        alpha: 0,
+        duration: 260,
+        onComplete: () => {
+          this.rivalBoss?.container.destroy()
+          this.rivalBoss?.shadow.destroy()
+          this.rivalBoss = undefined
+        },
+      })
+    }
+  }
+
+  private updateRivalBoss(delta: number) {
+    if (!this.rivalBoss || this.rivalBossState !== 'active') return
+
+    const boss = this.rivalBoss
+    boss.switchCooldown -= delta / 1000
+
+    if (boss.switchCooldown <= 0) {
+      boss.laneIndex = Phaser.Math.Clamp(
+        this.currentLaneIndex + Phaser.Math.Between(-1, 1),
+        0,
+        2,
+      )
+      boss.switchCooldown = Phaser.Math.FloatBetween(0.35, 0.7)
+    }
+
+    boss.depth += boss.speed * this.speedFactor() * 1.18 * (0.52 + boss.depth * 1.8) * (delta / 1000)
+    if (boss.depth > 0.96) boss.depth = 0.38
+
+    const p = this.project(boss.depth)
+    const targetX = this.laneCenterX(boss.laneIndex, boss.depth)
+
+    boss.container.x = Phaser.Math.Linear(boss.container.x || targetX, targetX, 0.18)
+    boss.container.y = p.y
+    boss.container.setScale(p.scale * 0.95)
+    boss.container.setAlpha(Phaser.Math.Linear(0.6, 1, p.eased))
+    boss.container.setDepth(Math.floor(p.y) + 3)
+
+    boss.shadow.x = boss.container.x
+    boss.shadow.y = boss.container.y + Phaser.Math.Linear(8, 30, p.eased)
+    boss.shadow.setScale(Phaser.Math.Linear(0.22, 1.15, p.eased), Phaser.Math.Linear(0.18, 0.94, p.eased))
+    boss.shadow.alpha = Phaser.Math.Linear(0.08, 0.24, p.eased)
+    boss.shadow.setDepth(Math.floor(p.y) + 2)
   }
 
   private triggerRageRush() {
@@ -2965,6 +3205,18 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(1, 0)
 
+    this.rivalBossBarBg = this.add.rectangle(width / 2 - 140, 156, 280, 12, 0x000000, 0).setOrigin(0, 0.5)
+    this.rivalBossBarFill = this.add.rectangle(width / 2 - 138, 156, 0, 8, 0xff9b7d, 1).setOrigin(0, 0.5)
+    this.rivalBossBarFill.setAlpha(0)
+    this.rivalBossText = this.add.text(width / 2, 136, '', {
+      fontFamily: 'Arial Black',
+      fontSize: '16px',
+      color: '#ffd7b0',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5)
+    this.rivalBossText.setAlpha(0)
+
     this.cursors = this.input.keyboard!.createCursorKeys()
     this.keyZ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Z)
     this.keyX = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.X)
@@ -3027,6 +3279,13 @@ class GameScene extends Phaser.Scene {
     this.trafficWaveTimer -= delta / 1000
     if (this.trafficWaveTimer <= 0) {
       this.triggerTrafficWave()
+    }
+
+    const missionProgress = 1 - this.distanceRemaining / this.mission.distance
+    this.maybeTriggerSetPiece(missionProgress)
+
+    if (!this.rivalBossTriggered && missionProgress >= 0.58) {
+      this.spawnRivalBoss()
     }
 
     this.anger = Math.min(100, this.anger + delta * 0.003)
@@ -3266,6 +3525,111 @@ class GameScene extends Phaser.Scene {
       cloud.container.setDepth(Math.floor(p.y))
     }
 
+    for (let i = this.setPieceHazards.length - 1; i >= 0; i--) {
+      const hazard = this.setPieceHazards[i]
+      hazard.depth += hazard.speed * this.speedFactor() * (0.54 + hazard.depth * 1.65) * (delta / 1000)
+
+      if (hazard.depth > 1.08) {
+        hazard.container.destroy()
+        hazard.shadow.destroy()
+        this.setPieceHazards.splice(i, 1)
+        continue
+      }
+
+      const p = this.project(hazard.depth)
+      hazard.container.x = this.laneCenterX(hazard.laneIndex, hazard.depth)
+      hazard.container.y = p.y
+      hazard.container.setScale(p.scale * 0.86)
+      hazard.container.setAlpha(Phaser.Math.Linear(0.58, 1, p.eased))
+      hazard.container.setDepth(Math.floor(p.y) + 1)
+
+      hazard.shadow.x = hazard.container.x
+      hazard.shadow.y = hazard.container.y + Phaser.Math.Linear(6, 28, p.eased)
+      hazard.shadow.setScale(Phaser.Math.Linear(0.2, 1.05, p.eased), Phaser.Math.Linear(0.18, 0.88, p.eased))
+      hazard.shadow.alpha = Phaser.Math.Linear(0.06, 0.22, p.eased)
+      hazard.shadow.setDepth(Math.floor(p.y))
+
+      const dx = Math.abs(hazard.container.x - this.player.x)
+      const dy = Math.abs(hazard.container.y - this.player.y)
+
+      if (!hazard.passed && hazard.depth > 0.7 && dx > 68 && dx < 130 && dy < 96) {
+        hazard.passed = true
+        this.score += 120 + this.combo * 12
+        this.addCombo()
+        this.spawnScorePopup(hazard.container.x, hazard.container.y - 12, 'SLIPPED THROUGH', '#8df0ff')
+      }
+
+      if (dx < 64 && dy < 92 && hazard.depth > 0.76) {
+        if (this.rushActive) {
+          this.score += 280
+          this.spawnSparkBurst(hazard.container.x, hazard.container.y, 0xffe8bc)
+          this.spawnScorePopup(hazard.container.x, hazard.container.y - 12, 'PLOWED', '#ffe8bc')
+          hazard.container.destroy()
+          hazard.shadow.destroy()
+          this.setPieceHazards.splice(i, 1)
+          continue
+        }
+
+        const destroyed = this.takeHit()
+        hazard.container.destroy()
+        hazard.shadow.destroy()
+        this.setPieceHazards.splice(i, 1)
+        if (destroyed) {
+          this.failMission('ROADBLOCKED')
+          return
+        }
+      }
+    }
+
+    this.updateRivalBoss(delta)
+
+    if (this.rivalBoss && this.rivalBossState === 'active') {
+      const boss = this.rivalBoss
+      const bossDx = Math.abs(boss.container.x - this.player.x)
+      const bossDy = Math.abs(boss.container.y - this.player.y)
+
+      if (bossDx < 62 && bossDy < 98 && boss.depth > 0.74) {
+        if (this.rushActive) {
+          this.damageRivalBoss(2, boss.container.x, boss.container.y, 'SLAM')
+          boss.depth = 0.4
+        } else {
+          const destroyed = this.takeHit()
+          boss.depth = 0.36
+          this.showBobReaction('HE IS ON YOU!')
+          if (destroyed) {
+            this.failMission('RIVAL WRECK')
+            return
+          }
+        }
+      }
+
+      for (const cloud of this.smokeClouds) {
+        const lastCloudId = boss.container.getData('lastSmokeCloudId') as number
+        if (
+          boss.laneIndex === cloud.laneIndex &&
+          Math.abs(boss.depth - cloud.depth) < 0.08 &&
+          lastCloudId !== cloud.id
+        ) {
+          boss.container.setData('lastSmokeCloudId', cloud.id)
+          this.damageRivalBoss(1, boss.container.x, boss.container.y, 'SMOKED')
+          boss.depth = Math.max(0.22, boss.depth - 0.12)
+          break
+        }
+      }
+
+      if (!boss.container.getData('nearMissed')) {
+        const sameLane = boss.laneIndex === this.currentLaneIndex
+        const nearMissWindow = boss.depth > 0.68 && boss.depth < 0.76
+        const sideMiss = bossDx > 64 && bossDx < 124 && bossDy < 92
+        if (!sameLane && nearMissWindow && sideMiss) {
+          boss.container.setData('nearMissed', true)
+          this.damageRivalBoss(1, boss.container.x, boss.container.y, 'SHAKEN')
+        }
+      } else if (boss.depth < 0.35) {
+        boss.container.setData('nearMissed', false)
+      }
+    }
+
     for (const enemy of this.enemyCars) {
       this.updateEnemyBehavior(enemy, delta)
 
@@ -3378,6 +3742,18 @@ class GameScene extends Phaser.Scene {
       this.rushMeterFill.setFillStyle(0xff9b3d, 1)
     }
 
+    if (this.rivalBoss && this.rivalBossState === 'active') {
+      this.rivalBossBarBg.setAlpha(0.7)
+      this.rivalBossBarFill.setAlpha(1)
+      this.rivalBossText.setAlpha(1)
+      this.rivalBossBarFill.width = 276 * Phaser.Math.Clamp(this.rivalBossHull / this.rivalBossMaxHull, 0, 1)
+    } else {
+      this.rivalBossBarBg.setAlpha(Math.max(0, this.rivalBossBarBg.alpha - 0.04))
+      this.rivalBossBarFill.setAlpha(Math.max(0, this.rivalBossBarFill.alpha - 0.04))
+      this.rivalBossText.setAlpha(Math.max(0, this.rivalBossText.alpha - 0.04))
+      if (this.rivalBossText.alpha <= 0.02) this.rivalBossText.setText('')
+    }
+
     this.updateBobMood()
     this.drawAngerFlames(time)
 
@@ -3486,5 +3862,6 @@ const config: Phaser.Types.Core.GameConfig = {
 }
 
 new Phaser.Game(config)
+
 
 
